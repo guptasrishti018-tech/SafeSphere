@@ -1,0 +1,1050 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:vibration/vibration.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:intl/intl.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:battery_plus/battery_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+
+class SosScreen extends StatefulWidget {
+  const SosScreen({super.key});
+
+  @override
+  State<SosScreen> createState() => _SosScreenState();
+}
+
+class _SosScreenState extends State<SosScreen>
+    with SingleTickerProviderStateMixin {
+  final AudioPlayer player = AudioPlayer();
+  late AnimationController _controller;
+  late Animation<double> _animation;
+  String sosMessage = "Press SOS to generate emergency message.";
+  String contact1 = "";
+  String contact2 = "";
+  String contact3 = "";
+  int countdown = 3;
+  bool isCounting = false;
+  bool cancelSOS = false;
+  bool gpsReady = false;
+  bool internetReady = true;
+  final Connectivity _connectivity = Connectivity();
+
+  String networkType = "Checking..."; // Abhi true rakhenge
+  bool sirenReady = true;
+
+  final Battery _battery = Battery();
+
+  int batteryLevel = 0;
+
+  @override
+  void initState() {
+    super.initState();
+
+    loadContacts();
+    getBatteryLevel();
+    checkInternet();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+
+    _animation = Tween<double>(
+      begin: 1.0,
+      end: 1.08,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+
+    _controller.repeat(reverse: true);
+  }
+
+  Future<void> loadContacts() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    setState(() {
+      contact1 = prefs.getString('contact1') ?? '';
+      contact2 = prefs.getString('contact2') ?? '';
+      contact3 = prefs.getString('contact3') ?? '';
+    });
+  }
+
+  Future<void> getBatteryLevel() async {
+    final level = await _battery.batteryLevel;
+
+    setState(() {
+      batteryLevel = level;
+    });
+  }
+
+  Future<void> checkInternet() async {
+    final result = await _connectivity.checkConnectivity();
+
+    setState(() {
+      if (result.contains(ConnectivityResult.wifi)) {
+        internetReady = true;
+
+        networkType = "WiFi";
+      } else if (result.contains(ConnectivityResult.mobile)) {
+        internetReady = true;
+
+        networkType = "Mobile Data";
+      } else {
+        internetReady = false;
+
+        networkType = "Offline";
+      }
+    });
+  }
+
+  Future<void> sendToContact(String number) async {
+    if (number.isEmpty) return;
+
+    final Uri uri = Uri.parse(
+      "https://wa.me/$number?text=${Uri.encodeComponent(sosMessage)}",
+    );
+
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> sendSMSAlert() async {
+    if (contact1.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please add Emergency Contact 1")),
+      );
+      return;
+    }
+
+    final Uri smsUri = Uri.parse(
+      "sms:$contact1?body=${Uri.encodeComponent(sosMessage)}",
+    );
+
+    await launchUrl(smsUri);
+  }
+
+  Future<void> makeCall(String number) async {
+    final Uri phoneUri = Uri.parse("tel:$number");
+
+    if (await canLaunchUrl(phoneUri)) {
+      await launchUrl(phoneUri);
+    }
+  }
+
+  Future<void> playSiren() async {
+    await player.play(AssetSource('siren.mp3.mp3'));
+  }
+
+  Future<void> vibratePhone() async {
+    print("VIBRATION STARTED");
+
+    await Vibration.vibrate(duration: 5000, amplitude: 255);
+  }
+
+  Future<void> generateSOSMessage() async {
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      Placemark place = placemarks.first;
+
+      String address =
+          "${place.street},\n"
+          "${place.locality},\n"
+          "${place.administrativeArea},\n"
+          "${place.country}";
+
+      setState(() {
+        gpsReady = true;
+      });
+
+      String currentDate = DateFormat('dd MMM yyyy').format(DateTime.now());
+
+      String currentTime = DateFormat('hh:mm a').format(DateTime.now());
+
+      String message =
+          "🚨 EMERGENCY ALERT 🚨\n\n"
+          "I need immediate assistance.\n\n"
+          "📅 Date : $currentDate\n"
+          "🕒 Time : $currentTime\n\n"
+          "📍 Address :\n"
+          "$address\n\n"
+          "🗺 Google Maps :\n"
+          "https://maps.google.com/?q=${position.latitude},${position.longitude}\n\n"
+          "Generated by SafeSphere AI";
+      setState(() {
+        sosMessage = message;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("SOS Message Generated")));
+    } catch (e) {
+      print(e);
+    }
+  }
+
+  Future<void> startSOSCountdown() async {
+    setState(() {
+      isCounting = true;
+      cancelSOS = false;
+      countdown = 3;
+    });
+
+    while (countdown > 0) {
+      await Future.delayed(const Duration(seconds: 1));
+
+      if (!mounted) return;
+
+      if (cancelSOS) {
+        setState(() {
+          isCounting = false;
+          countdown = 3;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("❌ SOS Cancelled"),
+            backgroundColor: Colors.orange,
+          ),
+        );
+
+        return;
+      }
+
+      setState(() {
+        countdown--;
+      });
+    }
+
+    setState(() {
+      isCounting = false;
+    });
+
+    await generateSOSMessage();
+    await playSiren();
+    await vibratePhone();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("🚨 SOS ACTIVATED"),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  Future<void> copyMessage() async {
+    await Clipboard.setData(ClipboardData(text: sosMessage));
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("SOS Message Copied")));
+  }
+
+  Future<void> shareOnWhatsApp() async {
+    try {
+      final Uri uri = Uri.parse(
+        "https://api.whatsapp.com/send?text=${Uri.encodeComponent(sosMessage)}",
+      );
+
+      print("Opening WhatsApp...");
+      print(uri);
+
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      print("WhatsApp Error: $e");
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("WhatsApp Error: $e")));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        elevation: 0,
+        centerTitle: true,
+        backgroundColor: Colors.red.shade700,
+        foregroundColor: Colors.white,
+        title: const Text(
+          "Emergency SOS",
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xffFFF5F5), Colors.white],
+          ),
+        ),
+
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            children: [
+              Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 24,
+                            backgroundColor: Colors.red,
+                            child: Icon(Icons.shield, color: Colors.white),
+                          ),
+
+                          SizedBox(width: 15),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "SafeSphere Emergency",
+                                  style: TextStyle(
+                                    fontSize: 21,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+
+                                const SizedBox(height: 6),
+
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.shade100,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: const Text(
+                                    "🟢 Ready to Send SOS",
+                                    style: TextStyle(
+                                      color: Colors.green,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+
+                                const SizedBox(height: 6),
+
+                                const Text(
+                                  "Stay Calm • Help is One Tap Away",
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _statusChip(Icons.gps_fixed, "GPS", gpsReady),
+
+                          _statusChip(Icons.wifi, networkType, internetReady),
+
+                          _statusChip(
+                            Icons.battery_full,
+                            "$batteryLevel%",
+                            batteryLevel > 20,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              GestureDetector(
+                onLongPress: () async {
+                  await startSOSCountdown();
+                },
+
+                child: ScaleTransition(
+                  scale: _animation,
+
+                  child: Container(
+                    height: 125,
+                    width: 125,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [Colors.red.shade800, Colors.red.shade400],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withOpacity(0.5),
+                          blurRadius: 14,
+                          spreadRadius: 1,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        isCounting
+                            ? Text(
+                              "$countdown",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 55,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            )
+                            : const Icon(
+                              Icons.warning_rounded,
+                              color: Colors.white,
+                              size: 38,
+                            ),
+
+                        SizedBox(height: 10),
+
+                        Text(
+                          "SOS",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+
+                        SizedBox(height: 5),
+
+                        Text(
+                          isCounting ? "Keep Holding..." : "Press & Hold",
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Card(
+                elevation: 6,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: const [
+                          Icon(Icons.description, color: Colors.red, size: 28),
+
+                          SizedBox(width: 10),
+
+                          Text(
+                            "Emergency Message",
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const Divider(height: 25),
+
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.location_on, color: Colors.red),
+
+                          const SizedBox(width: 10),
+
+                          Expanded(
+                            child: Text(
+                              sosMessage,
+                              style: const TextStyle(fontSize: 16, height: 1.5),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 15),
+
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          "Updated Just Now",
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Card(
+                elevation: 5,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.psychology,
+                            color: Colors.deepPurple,
+                            size: 28,
+                          ),
+
+                          const SizedBox(width: 10),
+
+                          const Expanded(
+                            child: Text(
+                              "AI Emergency Recommendation",
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const Divider(height: 25),
+
+                      ListTile(
+                        leading: const Icon(
+                          Icons.local_police,
+                          color: Colors.blue,
+                        ),
+                        title: const Text("Nearest Police"),
+                        subtitle: const Text("1.2 km Away"),
+                      ),
+
+                      ListTile(
+                        leading: const Icon(
+                          Icons.local_hospital,
+                          color: Colors.red,
+                        ),
+                        title: const Text("Nearest Hospital"),
+                        subtitle: const Text("850 m Away"),
+                      ),
+
+                      const Divider(),
+
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.lightbulb, color: Colors.deepPurple),
+
+                            SizedBox(width: 10),
+
+                            Expanded(
+                              child: Text(
+                                "Stay at your current location. Emergency responders can locate you faster. Keep your phone battery above 20%.",
+                                style: TextStyle(fontSize: 15, height: 1.5),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.contacts, color: Colors.red),
+                          SizedBox(width: 10),
+                          Text(
+                            "Emergency Contacts",
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 15),
+
+                      ListTile(
+                        leading: const CircleAvatar(
+                          backgroundColor: Colors.red,
+                          child: Icon(Icons.person, color: Colors.white),
+                        ),
+                        title: const Text("Contact 1"),
+                        subtitle: Text(
+                          contact1.isEmpty ? "Not Added" : contact1,
+                        ),
+                        trailing: Icon(
+                          contact1.isEmpty
+                              ? Icons.error_outline
+                              : Icons.check_circle,
+                          color:
+                              contact1.isEmpty ? Colors.orange : Colors.green,
+                        ),
+                      ),
+
+                      ListTile(
+                        leading: const CircleAvatar(
+                          backgroundColor: Colors.orange,
+                          child: Icon(Icons.person, color: Colors.white),
+                        ),
+                        title: const Text("Contact 2"),
+                        subtitle: Text(
+                          contact2.isEmpty ? "Not Added" : contact2,
+                        ),
+                        trailing: Icon(
+                          contact2.isEmpty
+                              ? Icons.error_outline
+                              : Icons.check_circle,
+                          color:
+                              contact2.isEmpty ? Colors.orange : Colors.green,
+                        ),
+                      ),
+
+                      ListTile(
+                        leading: const CircleAvatar(
+                          backgroundColor: Colors.green,
+                          child: Icon(Icons.person, color: Colors.white),
+                        ),
+                        title: const Text("Contact 3"),
+                        subtitle: Text(
+                          contact3.isEmpty ? "Not Added" : contact3,
+                        ),
+                        trailing: Icon(
+                          contact3.isEmpty
+                              ? Icons.error_outline
+                              : Icons.check_circle,
+                          color:
+                              contact3.isEmpty ? Colors.orange : Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              Card(
+                elevation: 5,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.health_and_safety, color: Colors.green),
+
+                          SizedBox(width: 10),
+
+                          Text(
+                            "System Status",
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      ListTile(
+                        leading: Icon(
+                          Icons.gps_fixed,
+                          color: gpsReady ? Colors.green : Colors.red,
+                        ),
+                        title: const Text("GPS"),
+                        subtitle: Text(
+                          gpsReady ? "Connected" : "Not Connected",
+                        ),
+                        trailing: Icon(
+                          gpsReady ? Icons.check_circle : Icons.cancel,
+                          color: gpsReady ? Colors.green : Colors.red,
+                        ),
+                      ),
+                      const Divider(),
+
+                      ListTile(
+                        leading: const Icon(
+                          Icons.battery_full,
+                          color: Colors.green,
+                        ),
+                        title: const Text("Battery"),
+                        subtitle: Text("$batteryLevel%"),
+                        trailing: Icon(
+                          batteryLevel > 20
+                              ? Icons.check_circle
+                              : Icons.warning,
+                          color:
+                              batteryLevel > 20 ? Colors.green : Colors.orange,
+                        ),
+                      ),
+
+                      const Divider(),
+
+                      ListTile(
+                        leading: const Icon(Icons.people, color: Colors.blue),
+                        title: const Text("Emergency Contacts"),
+                        subtitle: Text(
+                          "${[contact1, contact2, contact3].where((c) => c.isNotEmpty).length} Loaded",
+                        ),
+                        trailing: const Icon(
+                          Icons.check_circle,
+                          color: Colors.green,
+                        ),
+                      ),
+
+                      const Divider(),
+
+                      ListTile(
+                        leading: const Icon(
+                          Icons.volume_up,
+                          color: Colors.orange,
+                        ),
+                        title: const Text("Siren"),
+                        subtitle: Text(sirenReady ? "Ready" : "Unavailable"),
+                        trailing: Icon(
+                          sirenReady ? Icons.check_circle : Icons.cancel,
+                          color: sirenReady ? Colors.green : Colors.red,
+                        ),
+                      ),
+
+                      const Divider(),
+
+                      ListTile(
+                        leading: Icon(
+                          Icons.wifi,
+                          color: internetReady ? Colors.green : Colors.red,
+                        ),
+                        title: const Text("Internet"),
+                        subtitle: Text(networkType),
+                        trailing: Icon(
+                          internetReady ? Icons.check_circle : Icons.cancel,
+                          color: internetReady ? Colors.green : Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Quick Actions",
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+              ),
+
+              const SizedBox(height: 15),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 60),
+
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      onPressed: shareOnWhatsApp,
+                      icon: const FaIcon(FontAwesomeIcons.whatsapp),
+                      label: const Text("WhatsApp"),
+                    ),
+                  ),
+
+                  const SizedBox(width: 10),
+
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 60),
+
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      onPressed: sendSMSAlert,
+                      icon: const Icon(Icons.sms),
+                      label: const Text("SMS"),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 10),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(0, 60),
+
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      onPressed: copyMessage,
+                      icon: const Icon(Icons.copy),
+                      label: const Text("Copy"),
+                    ),
+                  ),
+
+                  const SizedBox(width: 10),
+
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 60),
+
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      onPressed: () async {
+                        await sendSMSAlert();
+
+                        if (contact1.isNotEmpty) {
+                          await sendToContact(contact1);
+                        }
+
+                        if (contact2.isNotEmpty) {
+                          await sendToContact(contact2);
+                        }
+
+                        if (contact3.isNotEmpty) {
+                          await sendToContact(contact3);
+                        }
+                      },
+                      icon: const Icon(Icons.campaign),
+                      label: const Text("Alert All"),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 25),
+
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Emergency Services",
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+              ),
+
+              const SizedBox(height: 15),
+
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.2,
+                children: [
+                  _serviceCard(
+                    icon: Icons.local_police,
+                    title: "Police",
+                    color: Colors.blue,
+                    onTap: () => makeCall("112"),
+                  ),
+
+                  _serviceCard(
+                    icon: Icons.local_hospital,
+                    title: "Ambulance",
+                    color: Colors.red,
+                    onTap: () => makeCall("108"),
+                  ),
+
+                  _serviceCard(
+                    icon: Icons.woman,
+                    title: "Women",
+                    color: Colors.pink,
+                    onTap: () => makeCall("1091"),
+                  ),
+
+                  _serviceCard(
+                    icon: Icons.fire_truck,
+                    title: "Fire",
+                    color: Colors.orange,
+                    onTap: () => makeCall("101"),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 30),
+
+              const Divider(),
+
+              const SizedBox(height: 10),
+
+              Text(
+                "Powered by SafeSphere",
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+
+              SizedBox(height: 5),
+
+              Text(
+                "Travel Smart • Travel Safe",
+                style: TextStyle(color: Colors.grey, fontSize: 13),
+              ),
+
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statusChip(IconData icon, String text, bool status) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color:
+            status ? Colors.green.withOpacity(.1) : Colors.red.withOpacity(.1),
+        borderRadius: BorderRadius.circular(30),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: status ? Colors.green : Colors.red),
+
+          const SizedBox(width: 6),
+
+          Text(
+            text,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: status ? Colors.green : Colors.red,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _serviceCard({
+    required IconData icon,
+    required String title,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.10),
+
+          borderRadius: BorderRadius.circular(18),
+
+          border: Border.all(color: color.withOpacity(0.30), width: 1.2),
+
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.20),
+              blurRadius: 12,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircleAvatar(
+              radius: 28,
+              backgroundColor: color,
+              child: Icon(icon, color: Colors.white),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    player.dispose();
+    super.dispose();
+  }
+}
