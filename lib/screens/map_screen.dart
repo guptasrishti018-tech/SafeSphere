@@ -5,6 +5,8 @@ import 'package:geolocator/geolocator.dart';
 import 'sos_screen.dart';
 import 'package:http/http.dart' as http;
 import 'package:geocoding/geocoding.dart';
+import 'dart:math';
+import 'full_map_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -21,11 +23,32 @@ class _MapScreenState extends State<MapScreen> {
   String locationText = "Getting your current address...";
 
   Set<Marker> markers = {};
-  int safetyScore = 40;
+
+  Set<Polyline> polylines = {};
+  LatLng? destinationPosition;
+  double safetyScore = 0;
+  double routeDistance = 0;
+  double routeDuration = 0;
+
+  String safetyStatus = "Not Calculated";
+
+  int policeCount = 0;
+
+  int hospitalCount = 0;
+
+  final TextEditingController destinationController = TextEditingController();
 
   String riskLevel = "Medium";
 
   String recommendation = "Analyzing current location...";
+  String policeCoverage = "Good";
+  String hospitalAccess = "Good";
+  String nightSafety = "Moderate";
+  String crowdDensity = "High";
+  String emergencySupport = "Available";
+  int policeNearby = 0;
+  int hospitalNearby = 0;
+  int petrolNearby = 0;
 
   @override
   void initState() {
@@ -132,15 +155,27 @@ ${currentPosition.longitude}
 );
 out body;
 ''';
+    } else if (type == "petrol") {
+      query = '''
+[out:json];
+node["amenity"="fuel"](
+around:5000,
+${currentPosition.latitude},
+${currentPosition.longitude}
+);
+out body;
+''';
     }
     print("QUERY = ");
     print(query);
     try {
       print("URL = https://overpass-api.de/api/interpreter");
       final response = await http.post(
-        Uri.parse("https://lz4.overpass-api.de/api/interpreter"),
+        Uri.parse("https://overpass.kumi.systems/api/interpreter"),
         body: {"data": query},
       );
+      print(response.statusCode);
+      print(response.body);
 
       print("STATUS CODE = ${response.statusCode}");
       print("RESPONSE = ${response.body}");
@@ -148,6 +183,21 @@ out body;
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         print("FOUND = ${data["elements"].length}");
+        int total = data["elements"].length;
+        print("TYPE = $type");
+        print("TOTAL = $total");
+
+        if (type == "police") {
+          policeNearby = total;
+        }
+
+        if (type == "hospital") {
+          hospitalNearby = total;
+        }
+
+        if (type == "petrol") {
+          petrolNearby = total;
+        }
 
         Set<Marker> newMarkers = {
           Marker(
@@ -156,6 +206,7 @@ out body;
             infoWindow: const InfoWindow(title: "My Current Location"),
           ),
         };
+        calculateSafetyScore();
 
         for (var place in data["elements"]) {
           newMarkers.add(
@@ -175,6 +226,15 @@ out body;
         setState(() {
           markers = newMarkers;
         });
+        if (type == "police") {
+          policeCount = newMarkers.length - 1;
+        }
+
+        if (type == "hospital") {
+          hospitalCount = newMarkers.length - 1;
+        }
+
+        calculateSafetyScore();
         mapController?.animateCamera(
           CameraUpdate.newLatLngZoom(currentPosition, 12),
         );
@@ -283,14 +343,45 @@ out body;
                 ),
               ],
             ),
-            child: const TextField(
+            child: TextField(
+              controller: destinationController,
               decoration: InputDecoration(
-                hintText: "Search hotels, police, hospitals...",
-                prefixIcon: Icon(Icons.search),
-                suffixIcon: Icon(Icons.mic),
+                hintText: "Enter Destination (e.g. Taj Mahal)",
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: const Icon(Icons.route),
                 border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 18),
+                contentPadding: const EdgeInsets.symmetric(vertical: 18),
               ),
+            ),
+          ),
+          const SizedBox(height: 15),
+
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.route),
+              label: const Text(
+                "Safe Route",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 55),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              onPressed: () async {
+                if (destinationController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Please enter a destination")),
+                  );
+                  return;
+                }
+
+                await getSafeRoute();
+              },
             ),
           ),
 
@@ -368,12 +459,10 @@ out body;
                 children: [
                   const Row(
                     children: [
-                      Icon(Icons.psychology, color: Colors.deepPurple),
-
+                      Icon(Icons.shield, color: Colors.green, size: 28),
                       SizedBox(width: 10),
-
                       Text(
-                        "AI Safety Analysis",
+                        "AI Risk Factors",
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -384,28 +473,60 @@ out body;
 
                   const Divider(height: 25),
 
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _analysisChip("Safety", "$safetyScore%", Colors.green),
-
-                      _analysisChip("Risk", riskLevel, Colors.blue),
-
-                      _analysisChip("GPS", "ON", Colors.orange),
-                    ],
+                  ListTile(
+                    leading: const Icon(
+                      Icons.local_police,
+                      color: Colors.indigo,
+                    ),
+                    title: const Text("Police Coverage"),
+                    trailing: Text(
+                      policeCoverage,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
 
-                  const SizedBox(height: 20),
-
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(.08),
-                      borderRadius: BorderRadius.circular(12),
+                  ListTile(
+                    leading: const Icon(
+                      Icons.local_hospital,
+                      color: Colors.red,
                     ),
-                    child: Text(
-                      "AI Recommendation:\n\n$recommendation",
-                      style: const TextStyle(height: 1.5),
+                    title: const Text("Hospital Access"),
+                    trailing: Text(
+                      hospitalAccess,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+
+                  ListTile(
+                    leading: const Icon(
+                      Icons.nightlight_round,
+                      color: Colors.orange,
+                    ),
+                    title: const Text("Night Safety"),
+                    trailing: Text(
+                      nightSafety,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+
+                  ListTile(
+                    leading: const Icon(Icons.groups, color: Colors.blue),
+                    title: const Text("Crowd Density"),
+                    trailing: Text(
+                      crowdDensity,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+
+                  ListTile(
+                    leading: const Icon(
+                      Icons.support_agent,
+                      color: Colors.green,
+                    ),
+                    title: const Text("Emergency Support"),
+                    trailing: Text(
+                      emergencySupport,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
@@ -413,22 +534,155 @@ out body;
             ),
           ),
 
+          const SizedBox(height: 20),
+
           SizedBox(
-            height: 380,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: GoogleMap(
-                initialCameraPosition: CameraPosition(
-                  target: currentPosition,
-                  zoom: 14,
+            height: MediaQuery.of(context).size.height * 0.80,
+            child: Stack(
+              children: [
+                GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: currentPosition,
+                    zoom: 16,
+                  ),
+                  markers: markers,
+                  polylines: polylines,
+                  onMapCreated: (controller) {
+                    mapController = controller;
+                  },
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: true,
                 ),
-                myLocationEnabled: true,
-                myLocationButtonEnabled: true,
-                zoomControlsEnabled: true,
-                markers: markers,
-                onMapCreated: (controller) {
-                  mapController = controller;
-                },
+
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: FloatingActionButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder:
+                              (_) => FullMapScreen(
+                                currentPosition: currentPosition,
+                                destinationPosition: destinationPosition,
+                                markers: markers,
+                                polylines: polylines,
+                                distance: routeDistance,
+                                eta: routeDuration,
+                                safetyScore: safetyScore,
+                              ),
+                        ),
+                      );
+                    },
+                    child: const Icon(Icons.fullscreen),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Card(
+            elevation: 6,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "🤖 AI Route Analysis",
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 12),
+                  LinearProgressIndicator(
+                    value: safetyScore / 100,
+                    minHeight: 10,
+                    borderRadius: BorderRadius.circular(20),
+                    backgroundColor: Colors.grey.shade300,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      safetyScore >= 80
+                          ? Colors.green
+                          : safetyScore >= 60
+                          ? Colors.orange
+                          : Colors.red,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Text(
+                    "Safety Score : ${safetyScore.toStringAsFixed(0)}%",
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+
+                  Text(
+                    "Risk Level : $riskLevel",
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+
+                  Row(
+                    children: [
+                      const Icon(Icons.route, color: Colors.blue, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        "Distance : ${routeDistance.toStringAsFixed(2)} km",
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.access_time,
+                        color: Colors.orange,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        "ETA : ${routeDuration.toStringAsFixed(0)} min",
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 10),
+                  Text(
+                    "🚓 Police Nearby : $policeNearby",
+                    style: const TextStyle(fontSize: 16),
+                  ),
+
+                  Text(
+                    "🏥 Hospital Nearby : $hospitalNearby",
+                    style: const TextStyle(fontSize: 16),
+                  ),
+
+                  Text(
+                    "⛽ Petrol Pumps : $petrolNearby",
+                    style: const TextStyle(fontSize: 16),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  Text(
+                    recommendation,
+                    style: const TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -631,6 +885,150 @@ out body;
         ],
       ),
     );
+  }
+
+  Future<void> getSafeRoute() async {
+    try {
+      List<Location> locations = await locationFromAddress(
+        destinationController.text.trim(),
+      );
+
+      if (locations.isEmpty) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Destination not found")));
+        return;
+      }
+
+      LatLng destination = LatLng(
+        locations.first.latitude,
+        locations.first.longitude,
+      );
+      destinationPosition = destination;
+
+      setState(() {
+        markers.add(
+          Marker(
+            markerId: const MarkerId("destination"),
+            position: destination,
+            infoWindow: InfoWindow(title: destinationController.text),
+          ),
+        );
+      });
+
+      await drawRoute(destination);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Destination Found Successfully")),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
+  }
+
+  Future<void> drawRoute(LatLng destination) async {
+    try {
+      final url = Uri.parse(
+        "https://router.project-osrm.org/route/v1/driving/"
+        "${currentPosition.longitude},${currentPosition.latitude};"
+        "${destination.longitude},${destination.latitude}"
+        "?overview=full&geometries=geojson",
+      );
+
+      final response = await http.get(url);
+
+      if (response.statusCode != 200) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Unable to fetch route")));
+        return;
+      }
+
+      final data = json.decode(response.body);
+      double distance = data["routes"][0]["distance"] / 1000;
+
+      double duration = data["routes"][0]["duration"] / 60;
+
+      final coordinates = data["routes"][0]["geometry"]["coordinates"] as List;
+
+      List<LatLng> routePoints = [];
+
+      for (var point in coordinates) {
+        routePoints.add(LatLng(point[1].toDouble(), point[0].toDouble()));
+      }
+
+      setState(() {
+        routeDistance = distance;
+        routeDuration = duration;
+        polylines.clear();
+
+        polylines.add(
+          Polyline(
+            polylineId: const PolylineId("safeRoute"),
+            points: routePoints,
+            color: Colors.blue,
+            width: 6,
+          ),
+        );
+      });
+      LatLngBounds bounds = LatLngBounds(
+        southwest: LatLng(
+          min(currentPosition.latitude, destination.latitude),
+          min(currentPosition.longitude, destination.longitude),
+        ),
+        northeast: LatLng(
+          max(currentPosition.latitude, destination.latitude),
+          max(currentPosition.longitude, destination.longitude),
+        ),
+      );
+
+      mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Route Error: $e")));
+    }
+  }
+
+  void calculateSafetyScore() {
+    double score = 40.0;
+
+    score += policeNearby * 8;
+    score += hospitalNearby * 6;
+    score += petrolNearby * 3;
+
+    if (score > 100) {
+      score = 100.0;
+    }
+
+    String risk;
+    String advice;
+
+    if (score >= 80) {
+      risk = "Low";
+      advice =
+          "Area looks safe.\nPolice and emergency services are available nearby.";
+    } else if (score >= 60) {
+      risk = "Medium";
+      advice = "Travel carefully.\nKeep emergency contacts ready.";
+    } else {
+      risk = "High";
+      advice = "Avoid travelling alone.\nUse SOS if required.";
+    }
+
+    setState(() {
+      safetyScore = score;
+      riskLevel = risk;
+      recommendation = advice;
+
+      policeCoverage = policeNearby > 0 ? "Good" : "Low";
+      hospitalAccess = hospitalNearby > 0 ? "Good" : "Low";
+      emergencySupport = score >= 70 ? "Available" : "Limited";
+      crowdDensity = score >= 70 ? "High" : "Low";
+      nightSafety = score >= 70 ? "Safe" : "Moderate";
+    });
   }
 
   Widget _destinationCard({

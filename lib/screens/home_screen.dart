@@ -5,6 +5,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../models/user_model.dart';
+import '../services/firestore_service.dart';
 
 import '../global.dart';
 import 'ai_screen.dart';
@@ -158,11 +160,13 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> loadUserName() async {
-    final prefs = await SharedPreferences.getInstance();
+    UserModel? user = await FirestoreService().getCurrentUser();
 
-    setState(() {
-      AppData.userName = prefs.getString("name") ?? "Traveler";
-    });
+    if (user != null) {
+      setState(() {
+        AppData.userName = user.fullName;
+      });
+    }
   }
 
   Future<void> makeCall(String number) async {

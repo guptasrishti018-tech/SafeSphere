@@ -10,6 +10,7 @@ import 'screens/ai_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/complete_profile_screen.dart';
 import 'screens/auth_checker.dart';
+import 'screens/splash_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,7 +27,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: const LoginScreen(),
+      home: const SplashScreen(),
     );
   }
 }

@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../global.dart';
+import 'sos_screen.dart';
 
 class AiScreen extends StatefulWidget {
   const AiScreen({super.key});
@@ -106,6 +107,132 @@ class _AiScreenState extends State<AiScreen> {
   Future<void> sendMessage() async {
     String userMessage = messageController.text.trim();
     String lowerMessage = userMessage.toLowerCase();
+    // 🚨 Emergency Detection
+    if (lowerMessage.contains("help") ||
+        lowerMessage.contains("sos") ||
+        lowerMessage.contains("emergency") ||
+        lowerMessage.contains("danger") ||
+        lowerMessage.contains("save me") ||
+        lowerMessage.contains("call police") ||
+        lowerMessage.contains("i am in danger")) {
+      setState(() {
+        messages.add({"role": "user", "text": userMessage});
+      });
+
+      messageController.clear();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.red,
+          content: Text("🚨 Emergency detected! Opening SOS Screen..."),
+          duration: Duration(seconds: 1),
+        ),
+      );
+
+      await Future.delayed(const Duration(seconds: 1));
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const SosScreen(autoCallPolice: true),
+        ),
+      );
+
+      return;
+    }
+    if (lowerMessage.contains("help") ||
+        lowerMessage.contains("sos") ||
+        lowerMessage.contains("emergency") ||
+        lowerMessage.contains("danger") ||
+        lowerMessage.contains("save me") ||
+        lowerMessage.contains("call police")) {
+      // User ka message chat me dikhao
+      setState(() {
+        messages.add({"role": "user", "text": userMessage});
+      });
+
+      // Chhota sa AI message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("🚨 Emergency detected! Opening SOS Screen..."),
+          backgroundColor: Colors.red,
+        ),
+      );
+
+      // 1 second wait
+      await Future.delayed(const Duration(seconds: 1));
+
+      // SOS Screen open
+      bool? callPolice = await showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text("🚨 Emergency Detected"),
+            content: const Text("Do you want to call Police (112)?"),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context, false);
+                },
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context, true);
+                },
+                child: const Text("Call"),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (callPolice == true) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const SosScreen(autoCallPolice: true),
+          ),
+        );
+      }
+
+      return;
+    }
+    // 🚨 Emergency Mode
+    if (lowerMessage.contains("help") ||
+        lowerMessage.contains("emergency") ||
+        lowerMessage.contains("danger") ||
+        lowerMessage.contains("save me") ||
+        lowerMessage.contains("sos")) {
+      setState(() {
+        messages.add({
+          "role": "ai",
+          "text": """
+🚨 EMERGENCY MODE ACTIVATED
+
+📞 Police : 112
+
+🚑 Ambulance : 108
+
+👩 Women Helpline : 1091
+
+🏥 Nearest Hospital :
+Open the Map tab and tap Hospital.
+
+👮 Nearest Police Station :
+Open the Map tab and tap Police.
+
+🛡 Stay calm.
+📍 Share your live location with trusted contacts.
+📲 Press the SOS button immediately if you are in danger.
+""",
+        });
+
+        isLoading = false;
+      });
+
+      return;
+    }
     print("CURRENT LOCATION = $currentLocation");
     print("USER MESSAGE = $userMessage");
     if (userMessage.isEmpty) return;
@@ -246,6 +373,79 @@ class _AiScreenState extends State<AiScreen> {
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "🤖 SafeSphere AI",
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+                ),
+
+                const SizedBox(height: 6),
+
+                Text(
+                  "Hello! How can I help you today?",
+                  style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
+                ),
+
+                const SizedBox(height: 15),
+
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    ActionChip(
+                      avatar: const Icon(Icons.security, color: Colors.green),
+                      label: const Text("Is this area safe?"),
+                      onPressed: () {
+                        messageController.text = "Is this area safe?";
+                      },
+                    ),
+
+                    ActionChip(
+                      avatar: const Icon(Icons.map, color: Colors.blue),
+                      label: const Text("Plan my trip"),
+                      onPressed: () {
+                        messageController.text = "Plan my trip";
+                      },
+                    ),
+
+                    ActionChip(
+                      avatar: const Icon(
+                        Icons.restaurant,
+                        color: Colors.orange,
+                      ),
+                      label: const Text("Nearby Restaurants"),
+                      onPressed: () {
+                        messageController.text = "Nearby restaurants";
+                      },
+                    ),
+
+                    ActionChip(
+                      avatar: const Icon(
+                        Icons.local_hospital,
+                        color: Colors.red,
+                      ),
+                      label: const Text("Emergency Help"),
+                      onPressed: () {
+                        messageController.text = "Emergency help";
+                      },
+                    ),
+
+                    ActionChip(
+                      avatar: const Icon(Icons.luggage, color: Colors.purple),
+                      label: const Text("Packing Tips"),
+                      onPressed: () {
+                        messageController.text = "Packing tips";
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(12),
@@ -276,11 +476,30 @@ class _AiScreenState extends State<AiScreen> {
           ),
 
           if (isLoading)
-            const Padding(
-              padding: EdgeInsets.all(10),
-              child: CircularProgressIndicator(),
-            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const CircleAvatar(
+                    radius: 18,
+                    backgroundColor: Colors.blue,
+                    child: Icon(Icons.smart_toy, color: Colors.white),
+                  ),
 
+                  const SizedBox(width: 12),
+
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const _TypingIndicator(),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.all(10),
             child: Row(
@@ -317,6 +536,42 @@ class _AiScreenState extends State<AiScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _TypingIndicator extends StatefulWidget {
+  const _TypingIndicator({super.key});
+
+  @override
+  State<_TypingIndicator> createState() => _TypingIndicatorState();
+}
+
+class _TypingIndicatorState extends State<_TypingIndicator> {
+  int dots = 1;
+
+  @override
+  void initState() {
+    super.initState();
+
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted) return false;
+
+      setState(() {
+        dots = dots % 3 + 1;
+      });
+
+      return true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      "🤖 SafeSphere AI is thinking${"." * dots}",
+      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
     );
   }
 }

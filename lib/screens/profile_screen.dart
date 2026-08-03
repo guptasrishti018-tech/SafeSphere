@@ -5,6 +5,8 @@ import 'login_screen.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../global.dart';
+import '../models/user_model.dart';
+import '../services/firestore_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -40,43 +42,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    final prefs = await SharedPreferences.getInstance();
+    await FirestoreService().updateUser({
+      "fullName": nameController.text.trim(),
+      "email": emailController.text.trim(),
+      "phone": phoneController.text.trim(),
 
-    await prefs.setString('name', nameController.text);
-    AppData.userName = nameController.text;
-    await prefs.setString('phone', phoneController.text);
-    await prefs.setString('email', emailController.text);
+      "emergencyContact1": contact1Controller.text.trim(),
+      "emergencyContact2": contact2Controller.text.trim(),
+      "emergencyContact3": contact3Controller.text.trim(),
+    });
 
-    await prefs.setString('contact1', contact1Controller.text);
-    await prefs.setString('contact2', contact2Controller.text);
-    await prefs.setString('contact3', contact3Controller.text);
+    AppData.userName = nameController.text.trim();
 
-    if (profileImage != null) {
-      await prefs.setString('profileImage', profileImage!.path);
-    }
+    setState(() {});
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("Profile Saved Successfully")));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Profile Updated Successfully")),
+    );
   }
 
   Future<void> loadProfile() async {
-    final prefs = await SharedPreferences.getInstance();
+    UserModel? user = await FirestoreService().getCurrentUser();
+
+    if (user == null) return;
 
     setState(() {
-      nameController.text = prefs.getString('name') ?? '';
-      phoneController.text =
-          FirebaseAuth.instance.currentUser?.phoneNumber ?? '';
-      emailController.text = prefs.getString('email') ?? '';
+      nameController.text = user.fullName;
+      phoneController.text = user.phone;
+      emailController.text = user.email;
 
-      contact1Controller.text = prefs.getString('contact1') ?? '';
-      contact2Controller.text = prefs.getString('contact2') ?? '';
-      contact3Controller.text = prefs.getString('contact3') ?? '';
-      String? imagePath = prefs.getString('profileImage');
-
-      if (imagePath != null) {
-        profileImage = File(imagePath);
-      }
+      contact1Controller.text = user.emergencyContact1;
+      contact2Controller.text = user.emergencyContact2;
+      contact3Controller.text = user.emergencyContact3;
     });
   }
 

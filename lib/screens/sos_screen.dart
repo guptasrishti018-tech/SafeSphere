@@ -12,7 +12,9 @@ import 'package:battery_plus/battery_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 class SosScreen extends StatefulWidget {
-  const SosScreen({super.key});
+  final bool autoCallPolice;
+
+  const SosScreen({super.key, this.autoCallPolice = false});
 
   @override
   State<SosScreen> createState() => _SosScreenState();
@@ -60,6 +62,11 @@ class _SosScreenState extends State<SosScreen>
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
 
     _controller.repeat(reverse: true);
+    loadContacts();
+
+    if (widget.autoCallPolice) {
+      Future.delayed(const Duration(milliseconds: 500), showPoliceCallDialog);
+    }
   }
 
   Future<void> loadContacts() async {
@@ -70,6 +77,36 @@ class _SosScreenState extends State<SosScreen>
       contact2 = prefs.getString('contact2') ?? '';
       contact3 = prefs.getString('contact3') ?? '';
     });
+  }
+
+  Future<void> showPoliceCallDialog() async {
+    bool? call = await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("🚨 Emergency"),
+          content: const Text("Do you want to call Police (112)?"),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+              },
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context, true);
+              },
+              child: const Text("Call"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (call == true) {
+      makeCall("112");
+    }
   }
 
   Future<void> getBatteryLevel() async {
@@ -361,8 +398,10 @@ class _SosScreenState extends State<SosScreen>
 
                       const SizedBox(height: 20),
 
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        alignment: WrapAlignment.spaceBetween,
                         children: [
                           _statusChip(Icons.gps_fixed, "GPS", gpsReady),
 
